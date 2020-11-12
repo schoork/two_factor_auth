@@ -1,24 +1,31 @@
-# README
+# Setup
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+In Gemfile:
+```
+gem 'devise-two-factor'
+gem 'rqrcode'
+```
 
-Things you may want to cover:
+In terminal:
+```
+rails g devise_two_factor User OTP_KEY
+```
 
-* Ruby version
+A couple of lines are added to the User model. Include `:two_factor_backupable`, too.
 
-* System dependencies
+It also adds a few lines to the top of /config/initializers/devise.rb.
+Make sure to add a line for the backupable, too.
 
-* Configuration
+```
+config.warden do |manager|
+  manager.default_strategies(:scope => :user).unshift :two_factor_authenticatable
+  manager.default_strategies(:scope => :user).unshift :two_factor_backupable
+end
+```
 
-* Database creation
+Add a migration for backupable. Since in postgres, can use the `array:
+true`. If were in MySQL would need to do something else.
 
-* Database initialization
-
-* How to run the test suite
-
-* Services (job queues, cache servers, search engines, etc.)
-
-* Deployment instructions
-
-* ...
+```
+add_column :users, :otp_backup_codes, :string, array: true.
+```
