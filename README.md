@@ -79,7 +79,24 @@ rails g devise_two_factor User OTP_KEY
 
 A couple of lines are added to the User model. Include `:two_factor_backupable`, too.
 
-It also adds a few lines to the top of /config/initializers/devise.rb.
+Another line that is added is `:otp_secret_encryption_key => ENV['OTP_KEY']`. To set the OTP_KEY, open rails console and create a key:
+
+```
+> SecureRandom.hex 16
+```
+
+Exit the console. Copy the value and input in the bash_profile by running:
+
+```
+$ echo 'export OTP_KEY=< KEY >' >> ~/.bash_profile
+```
+
+You can check this worked by opening the console again and running `>
+ENV["OTP_KEY"]`. It should give you the key.
+
+Make sure to source bash_profile in any and all terminal windows/tabs.
+
+The installer also adds a few lines to the top of /config/initializers/devise.rb.
 Make sure to add a line for the backupable, too.
 
 ```
@@ -126,12 +143,11 @@ Create app/controller/two_factors_controller.rb and add the following.
 class TwoFactorsController < ApplicationController
 
   def create
+    @codes = current_user.generate_otp_backup_codes!
     current_user.update(
-      opt_secret: User.generate_otp_secret,
+      otp_secret: User.generate_otp_secret,
       otp_required_for_login: true,
     )
-
-    @codes = current_user.generate_otp_backup_codes!
   end
 
   def destroy
@@ -165,6 +181,62 @@ looks like this.
 </div>
 
 </hr>
+```
+
+The partial will have buttons for enabling and disabling two factor
+authentication, as long as directions for downloading the Google
+Authenticator app. It also displays the qr code and backup codes for
+users to write down.
+
+app/views/devise/registrations/_two_factor.html.erb:
+
+```
+<% if current_user.otp_required_for_login %>
+  <div><%= link_to "Disable", two_factor_path, method: :delete, remote: true %></div>
+
+  <div class="row">
+    <div class="col-8">
+      <ol class="mt-5">
+        <li>
+          Install Google Authenticator:
+          <%= link_to "Android", "https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en", target: '_blank' %>
+          or
+          <%= link_to "iOS", "https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8", target: :blank %>
+        </li>
+        <li>In the app, select, "Set up account" or the Plus (+) sign.</li>
+        <li>Choose "scan barcode".</li>
+      </ol>
+    </div>
+
+    <div class="col-4 text-center">
+      <%= current_user.otp_qr_code.html_safe %>
+    </div>
+  </div>
+
+  <% if @codes %>
+    <hr>
+
+    <p><strong class="badge badge-danger">Important!</strong> Write these backups codes down in a safe place. They can be used once to login to your account if your 2FA device is unavailable. They will never be displayed again for security.</p>
+
+    <% @codes.each do |code| %>
+      <div><strong><%= code %></strong></div>
+    <% end %>
+  <% end %>
+<% else %>
+  <p>When you login, you will be required to enter a one-time code along to one of your devices.</p>
+  <div><%= link_to "Enable", two_factor_path, method: :post, remote: true %></div>
+<% end %>
+```
+
+Define a method in app/models/user.rb:
+
+```
+def otp_qr_code
+  issuer = "TwoFactor"
+  label = "#{issuer}:#{email}"
+  qrcode = RQRCode::QRCode.new(otp_provisioning_uri(label, issuer: issuer))
+  qrcode.as_svg(module_size: 4)
+end
 ```
 
 
