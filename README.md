@@ -1,4 +1,70 @@
-# Setup
+# Postgres in Development
+
+This is needed for the backup codes. SQLite doesn't handle arrays.
+[This page](https://www.digitalocean.com/community/tutorials/how-to-use-postgresql-with-your-ruby-on-rails-application-on-macos)
+explains how to setup a postgres DB on local machine.
+
+Incidentally this will help with the ILIKE problem with searching.
+
+## Installing Postgres
+
+In the terminal run:
+```
+$ postgres -V
+```
+
+If you get something like `postgres (PostgreSQL) 10.9`, then skip to
+running postgres.
+
+If you get an error, run in the terminal. In the third line, replace
+the 10 with the version installed.
+```
+$ brew install postgresql
+$ postgres -V
+$ echo 'export PATH="/usr/local/opt/postgresql@10/bin:$PATH"' >> ~/.bash_profile
+$ source ~/.bash_profile
+```
+
+## Running Postgres
+
+In the terminal run the following, replacing the 10 with the version
+number of the postgres installation.
+```
+$ brew services start postgresql@10
+```
+
+## Database Configuration and Creation
+
+Change the database configuration for default, development, and test. config/database.yml:
+```
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  username: samwilliams
+  password: <%= ENV['TWOFACTORAUTH_DATABASE_PASSWORD'] %>
+
+development:
+  <<: *default
+  database: twofactorauth_development
+
+# Warning: The database defined as "test" will be erased and
+# re-generated from your development database when you run "rake".
+# Do not set this db to the same as development or production.
+test:
+  <<: *default
+  database: twofactorauth_test
+```
+
+In terminal:
+```
+$ echo 'export TWOFACTORAUTH_DATABASE_PASSWORD="PostgreSQL_Role_password"' >> ~/.bash_profile
+$ source ~/.bash_profile
+$ rails db:create
+$ rails db:migrate
+```
+
+# Two Factor Installation
 
 In Gemfile:
 ```
@@ -29,3 +95,83 @@ true`. If were in MySQL would need to do something else.
 ```
 add_column :users, :otp_backup_codes, :string, array: true.
 ```
+
+Run `rails db:migrate`.
+
+# Setup
+
+Override the normal sessions controller by changing the normal
+`devise_for :users` in config/routes.rb.
+
+```
+devise_for users, controllers: {sessions: "users/sessions"}
+```
+
+Also in the routes file. `resource :two_factor` will give us a way for
+users to turn on and off two factor authentication. 
+
+```
+devise_scope :user do
+  scope :users, as: :users do
+    post 'pre_otp', to: "users/sessions#pre_otp"
+  end
+end
+
+resource :two_factor
+```
+
+Create app/controller/two_factors_controller.rb and add the following.
+
+```
+class TwoFactorsController < ApplicationController
+
+  def create
+    current_user.update(
+      opt_secret: User.generate_otp_secret,
+      otp_required_for_login: true,
+    )
+
+    @codes = current_user.generate_otp_backup_codes!
+  end
+
+  def destroy
+    current_user.update(
+      otp_required_for_login: false
+    )
+  end
+
+end
+```
+
+Since both create and destroy will be sent over AJAX, they can benefit
+from some return partials. Add app/views/two_factors/create.js.erb and
+app/views/two_factors/destroy.js.erb. Add the following line to both.
+
+```
+$("#two_factor").html("<%=j render partial: "two_factor" %>")
+```
+
+Then in the registration view (using for this temp app), display the
+partial inside of a div with the same id. Placed below the form, it
+looks like this.
+
+```
+<hr>
+
+<h2>Two Factor Authentication</h2>
+
+<div id="two_factor">
+  <%= render "devise/registrations/two_factor" %>
+</div>
+
+</hr>
+```
+
+
+# Usage
+
+In terms of switching everyone over, could set `:opt_required_for_login`
+as default on new users and could do a callback or something if they
+don't have it on the first time they login.
+
+
