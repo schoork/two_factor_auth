@@ -66,6 +66,9 @@ $ rails db:migrate
 
 # Two Factor Installation
 
+[GoRails
+video](https://gorails.com/episodes/two-factor-auth-with-devise)
+
 In Gemfile:
 ```
 gem 'devise-two-factor'
@@ -137,6 +140,28 @@ end
 resource :two_factor
 ```
 
+Add a new controller to run the sessions.
+app/controllers/users/sessions_controller.rb:
+
+```
+class Users::SessionsController < Devise::SessionsController
+  def pre_otp
+    user = User.find_by pre_otp_params
+    @two_factor_enabled = user && user.otp_required_for_login
+
+    respond_to do |format|
+      format.js
+    end
+  end
+
+  private
+
+  def pre_otp_params
+    params.require(:user).permit(:email)
+  end
+end
+```
+
 Create app/controller/two_factors_controller.rb and add the following.
 
 ```
@@ -185,7 +210,7 @@ looks like this.
 
 The partial will have buttons for enabling and disabling two factor
 authentication, as long as directions for downloading the Google
-Authenticator app. It also displays the qr code and backup codes for
+Authenticator app. It also displays the QR code and backup codes for
 users to write down.
 
 app/views/devise/registrations/_two_factor.html.erb:
@@ -239,11 +264,82 @@ def otp_qr_code
 end
 ```
 
+Add the following to app/controllers/application_controller.rb. I'm not
+sure the first parameter is necessary since we don't allow people to
+just sign up.
+
+```
+before_action :configure_permitted_parameters, if: :devise_controller?
+
+  protected
+
+    def configure_permitted_parameters
+      devise_parameter_sanitizer.permit(:sign_up, keys: [:name])
+      devise_parameter_sanitizer.permit(:account_update, keys: [:name])
+      devise_parameter_sanitizer.permit(:sign_in, keys: [:otp_attempt])
+    end
+```
+
+You'll also need to fix the login view for two forms. Both forms will be
+contained in app/views/devise/sessions/new.html.erb.
+1. Just the email, will check to see if the user requires two factor
+   auth for login.
+2. Display the password field (and two factor field if necessary).
+
+The first form will look like this. The path, method, remote, and html
+attributes have been changed and a submit button has been added.
+```
+<%= form_for(resource, as: resource_name, url: users_pre_otp_path, method: :post, remote: true, html: {id: 'step-1'}) do |f| %>
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.email_field :email, autofocus: true, autocomplete: "email" %>
+  </div>
+
+  <div class="form-group">
+    <%= f.submit "Next" %>
+  </div>
+<% end %>
+```
+
+The second part of the form won't change much, but there are a couple of
+updates.
+
+Add some html parameters to the form and a new two factor code field.
+
+```
+<%= form_for(resource, as: resource_name, url: session_path(resource_name), html: {class: 'd-none', id: 'step-2'}) do |f| %>
+...
+  <%= f.text_field :otp_attempt, label: '2FA Code', class: 'd-none', id:
+'step-2-otp' %>
+...
+<% end %>
+```
+
+Last, but not least, add js file for the pre_otp action.
+app/views/devise/sessions/pre_otp.js.erb:
+```
+var stepOne = $("#step-1")
+var stepTwo = $("#step-2")
+
+stepOne.addClass('d-none')
+stepTwo.removeClass('d-none')
+
+var email = stepOne.find("#user_email").val()
+stepTwo.find("#user_email").val(email)
+stepTwo.find("#user_password").focus()
+
+<% if @two_factor_enabled %>
+  $("#step-2-otp").removeClass('d-none')
+<% end %>
+```
 
 # Usage
 
-In terms of switching everyone over, could set `:opt_required_for_login`
-as default on new users and could do a callback or something if they
-don't have it on the first time they login.
-
-
+This app creates a way for users to enable and disable two-factor
+authorization. Would need to change a bit if wanted to force for all
+users. Some thoughts on this:
+1. Allow users their first sign in without, or give them a backup code
+   in email.
+2. Instead of disable button, will need a button to reset backup codes.
+3. This seems a little bit overkill. Give users the ability to do it,
+   but don't force them.
